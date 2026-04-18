@@ -1,4 +1,5 @@
 import json
+import sys
 
 import torch
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_NAME = "Qwen/Qwen2.5-Coder-3B-Instruct"
+
 
 app = FastAPI()
 
@@ -15,6 +17,8 @@ model = AutoModelForCausalLM.from_pretrained(
     dtype=torch.float16,
     device_map="auto",
 )
+
+print("Model device:", next(model.parameters()).device)
 
 
 class ChatRequest(BaseModel):
@@ -45,6 +49,14 @@ def health():
 @app.post("/chat", response_model=ChatResponse)
 @torch.inference_mode()
 def chat(payload: ChatRequest) -> ChatResponse:
+    print("Python version:", sys.version)
+    print("Torch version:", torch.__version__)
+    print("CUDA available:", torch.cuda.is_available())
+    print("CUDA device count:", torch.cuda.device_count())
+
+    if torch.cuda.is_available():
+        print("CUDA device name:", torch.cuda.get_device_name(0))
+
     messages = [
         {
             "role": "system",
