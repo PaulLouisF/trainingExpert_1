@@ -1,5 +1,6 @@
 fastapi
-torch
-transformers
+#torch
+#transformers
 uvicorn
 accelerate
+vllm
