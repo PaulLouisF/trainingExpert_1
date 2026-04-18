@@ -1,25 +1,25 @@
 import json
 import sys
 
-import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from vllm import LLM, SamplingParams
 
 MODEL_NAME = "Qwen/Qwen2.5-Coder-3B-Instruct"
 
-
 app = FastAPI()
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    dtype=torch.float16,
-    device_map="auto",
+# Initialize vLLM engine
+llm = LLM(
+    model=MODEL_NAME,
+    trust_remote_code=True,
+    dtype="half",  # fp16
 )
 
-print("Model device:", next(model.parameters()).device)
+# Get tokenizer from vLLM
+tokenizer = llm.get_tokenizer()
 
+print("vLLM model loaded:", MODEL_NAME)
 
 class ChatRequest(BaseModel):
     message: str
@@ -47,15 +47,8 @@ def health():
 
 
 @app.post("/chat", response_model=ChatResponse)
-@torch.inference_mode()
 def chat(payload: ChatRequest) -> ChatResponse:
     print("Python version:", sys.version)
-    print("Torch version:", torch.__version__)
-    print("CUDA available:", torch.cuda.is_available())
-    print("CUDA device count:", torch.cuda.device_count())
-
-    if torch.cuda.is_available():
-        print("CUDA device name:", torch.cuda.get_device_name(0))
 
     messages = [
         {
@@ -73,26 +66,23 @@ def chat(payload: ChatRequest) -> ChatResponse:
         },
     ]
 
-    text = tokenizer.apply_chat_template(
+    # Apply chat template (same as before)
+    prompt = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
 
-    inputs = tokenizer(text, return_tensors="pt").to(model.device)
-
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=256,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        use_cache=True,
+    # Sampling config (deterministic)
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        max_tokens=256,
+        stop=["```"],  # safety
     )
 
-    response = tokenizer.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
-        skip_special_tokens=True,
-    )
+    # Generate with vLLM
+    outputs = llm.generate([prompt], sampling_params)
+
+    response = outputs[0].outputs[0].text
 
     return ChatResponse(response=strip_code_fence(response))
